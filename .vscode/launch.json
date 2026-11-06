@@ -1,0 +1,24 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug STM32 (OpenOCD)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/blink-debug.elf",
+            "servertype": "openocd",
+            "configFiles": ["${workspaceFolder}/stm32f3.cfg"],
+            "gdbPath": "gdb",
+            "runToEntryPoint": "main",
+            "preLaunchTask": "Build debug firmware"
+        },
+        // {
+        //     "name": "Build and flash (make)",
+        //     "type": "node-terminal",
+        //     "request": "launch",
+        //     "command": "make",
+        //     "cwd": "${workspaceFolder}"
+        // }
+    ]
+}

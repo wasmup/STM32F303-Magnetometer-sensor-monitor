@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sensor measurements</title>
+  <style>
+    body {
+      font: 16px system-ui, sans-serif;
+      max-width: 900px;
+      margin: 3rem auto;
+      padding: 0 1rem;
+      background: #101820;
+      color: #e7eef4
+    }
+
+    h1 {
+      font-size: 1.5rem
+    }
+
+    h2 {
+      font-size: 1.1rem;
+      margin-top: 2rem
+    }
+
+    #status {
+      color: #a8c3d6;
+      white-space: pre-wrap
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      background: #1c2b37;
+      font-variant-numeric: tabular-nums
+    }
+
+    th,
+    td {
+      padding: .65rem .8rem;
+      border-bottom: 1px solid #314756;
+      text-align: right
+    }
+
+    th:first-child,
+    td:first-child {
+      text-align: left
+    }
+
+    th {
+      color: #a8c3d6
+    }
+
+    canvas {
+      width: 100%;
+      height: 300px;
+      background: #1c2b37;
+      border-radius: 6px
+    }
+
+    .legend {
+      color: #a8c3d6;
+      font-size: .9rem
+    }
+
+    .temp {
+      color: #62d3ff
+    }
+
+    .vref {
+      color: #ffc56b
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Sensor measurements</h1>
+  <p id="status" role="status">Waiting for the first reading…</p>
+  <h2>Motion sensors</h2>
+  <p class="legend">Raw signed sensor register values. Each axis uses the sensor's coordinate system.</p>
+  <p class="legend"><span style="color:#62d3ff">● X</span> &nbsp; <span style="color:#ffc56b">● Y</span> &nbsp; <span
+      style="color:#f083a9">● Z</span> · latest 20 seconds · raw counts</p>
+  <h3>Magnetometer</h3><canvas id="mag-chart" role="img"
+    aria-label="Magnetometer X, Y and Z over the last 20 seconds"></canvas>
+  <h3>Gyroscope</h3><canvas id="gyro-chart" role="img"
+    aria-label="Gyroscope X, Y and Z over the last 20 seconds"></canvas>
+  <h3>Accelerometer</h3><canvas id="accel-chart" role="img"
+    aria-label="Accelerometer X, Y and Z over the last 20 seconds"></canvas>
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">Sensor</th>
+        <th scope="col">X</th>
+        <th scope="col">Y</th>
+        <th scope="col">Z</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th scope="row">Magnetometer</th>
+        <td id="mag-x">—</td>
+        <td id="mag-y">—</td>
+        <td id="mag-z">—</td>
+      </tr>
+      <tr>
+        <th scope="row">Gyroscope</th>
+        <td id="gyro-x">—</td>
+        <td id="gyro-y">—</td>
+        <td id="gyro-z">—</td>
+      </tr>
+      <tr>
+        <th scope="row">Accelerometer</th>
+        <td id="accel-x">—</td>
+        <td id="accel-y">—</td>
+        <td id="accel-z">—</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="legend" id="sensor-models"></p>
+  <h2>Temperature sensor</h2>
+  <p>Calibrated estimate: <strong id="temperature-c">—</strong> · Raw ADC: <span id="temp-last">—</span></p>
+  <p class="legend">Internal die temperature in °C · latest 20 seconds</p>
+  <canvas id="temp-chart" role="img" aria-label="Calibrated temperature estimate over the last 20 seconds"></canvas>
+  <h2>VREFINT</h2>
+  <p>Estimated VDDA: <strong id="vdda">—</strong> · Raw ADC: <span id="vref-last">—</span></p>
+  <p class="legend">Estimated ADC supply voltage in volts · latest 20 seconds</p>
+  <canvas id="vref-chart" role="img" aria-label="Estimated ADC supply voltage over the last 20 seconds"></canvas>
+  <script>
+    const status = document.getElementById('status');
+    const points = [];
+    const charts = [
+      ...['mag', 'gyro', 'accel'].map(sensor => ({
+        id: `${sensor}-chart`, sensor,
+        series: [['x', '#62d3ff'], ['y', '#ffc56b'], ['z', '#f083a9']]
+      })),
+      { id: 'temp-chart', series: [['temp', '#62d3ff']], precision: 1 },
+      { id: 'vref-chart', series: [['vref', '#ffc56b']], precision: 3 }
+    ];
+    let lastUpdate = '';
+    function drawChart(chart) {
+      const canvas = document.getElementById(chart.id);
+      const width = canvas.clientWidth, height = canvas.clientHeight, scale = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * scale); canvas.height = Math.round(height * scale);
+      const ctx = canvas.getContext('2d'); ctx.scale(scale, scale);
+      const left = 55, right = width - 15, top = 15, bottom = height - 30;
+      const end = Date.now(), start = end - 20000;
+      const visible = points.filter(p => p.time >= start && p.time <= end);
+      const value = (p, key) => chart.sensor ? p[chart.sensor]?.[key] : p[key];
+      const values = visible.flatMap(p => chart.series.map(([key]) => value(p, key))).filter(Number.isFinite);
+      ctx.font = '12px system-ui'; ctx.fillStyle = '#a8c3d6'; ctx.strokeStyle = '#314756';
+      if (!values.length) {
+        ctx.fillText('No data available', left, top + 12);
+        return;
+      }
+      let min = Math.min(...values), max = Math.max(...values);
+      const padding = Math.max(chart.precision === 3 ? 0.01 : chart.precision === 1 ? 0.1 : 2, (max - min) * 0.05);
+      min -= padding; max += padding;
+      for (let i = 0; i <= 4; i++) {
+        const y = top + (bottom - top) * i / 4;
+        ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+        ctx.fillText((max - (max - min) * i / 4).toFixed(chart.precision || 0), 4, y + 4);
+      }
+      ctx.fillText('−20 s', left, height - 8); ctx.fillText('now', right - 25, height - 8);
+      for (const [key, color] of chart.series) {
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+        let drawing = false;
+        visible.forEach(p => {
+          const v = value(p, key);
+          if (!Number.isFinite(v)) { drawing = false; return; }
+          const x = left + (p.time - start) / 20000 * (right - left);
+          const y = bottom - (v - min) / (max - min) * (bottom - top);
+          if (!drawing) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          drawing = true;
+        });
+        ctx.stroke();
+      }
+    }
+    function drawCharts() { charts.forEach(drawChart); }
+    window.addEventListener('resize', drawCharts);
+    async function refresh() {
+      try {
+        const response = await fetch('/api/measurements', { cache: 'no-store' });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const result = await response.json();
+        if (result.reading) {
+          const reading = result.reading;
+          if (result.updated !== lastUpdate) {
+            lastUpdate = result.updated;
+            points.push({ time: new Date(result.updated).getTime(), temp: reading.temperature_c, vref: reading.vdda_v, gyro: reading.gyro, accel: reading.accel, mag: reading.mag });
+            while (points.length && points[0].time < Date.now() - 20000) points.shift();
+            drawCharts();
+          }
+          document.getElementById('temperature-c').textContent = reading.temperature_c == null ? 'Unavailable' : reading.temperature_c.toFixed(1) + ' °C';
+          document.getElementById('vdda').textContent = reading.vdda_v == null ? 'Unavailable' : reading.vdda_v.toFixed(3) + ' V VDDA';
+          for (const sensor of ['mag', 'gyro', 'accel']) {
+            for (const axis of ['x', 'y', 'z'])
+              document.getElementById(`${sensor}-${axis}`).textContent = reading[sensor]?.[axis] ?? 'Unavailable';
+          }
+          document.getElementById('sensor-models').textContent = `Gyroscope ID: 0x${reading.gyro_id.toString(16)} · Magnetometer: ${{ 1: 'LSM303DLHC', 2: 'LSM303AGR' }[reading.mag_type] || 'Unknown'}`;
+          for (const name of ['temp', 'vref']) {
+            document.getElementById(`${name}-last`).textContent = reading[`last_${name}_adc`];
+          }
+        }
+        status.textContent = result.error ? 'Measurement error: ' + result.error : result.reading ? 'Updated ' + new Date(result.updated).toLocaleTimeString() : 'Waiting for the first reading…';
+      } catch (error) { status.textContent = 'Connection error: ' + error.message; }
+      setTimeout(refresh, 100);
+    }
+    refresh();
+  </script>
+</body>
+
+</html>
